@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Theme } from '../App';
 
 // --- Types ---
 
@@ -176,9 +177,10 @@ const SUPPORTED_CMDS = [
 interface Props {
   initialCommand?: string;
   activeCommandName?: string;
+  theme?: Theme;
 }
 
-export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCommandName }) => {
+export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCommandName, theme = 'default' }) => {
   const [history, setHistory] = useState<TerminalLine[]>([
     { type: 'info', content: `Terminus Linux Shell [Version 1.0.0]` },
     { type: 'info', content: `Copyright (c) 2024 Terminus Systems. Type 'help' to see all ${SUPPORTED_CMDS.length} supported commands.` },
@@ -1023,6 +1025,53 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
     }
   };
 
+  // --- Theme Colors ---
+  const getColors = () => {
+    switch(theme) {
+        case 'retro': // Red Alert (Sysadmin Panic)
+            return {
+                bg: 'bg-black',
+                border: 'border-red-600',
+                text: 'text-red-600',
+                textMuted: 'text-red-900',
+                textError: 'text-red-500 font-bold bg-red-900/20',
+                textInfo: 'text-red-400',
+                textPrompt: 'text-red-600 font-bold',
+                textInput: 'text-red-500',
+                placeholder: 'placeholder-red-900',
+                inputBarBg: 'bg-neutral-900 border-t border-red-600'
+            };
+        case 'synthwave':
+            return {
+                bg: 'bg-[#0d0221]',
+                border: 'border-fuchsia-500/50',
+                text: 'text-fuchsia-300',
+                textMuted: 'text-cyan-400/60',
+                textError: 'text-red-500',
+                textInfo: 'text-cyan-400',
+                textPrompt: 'text-fuchsia-500 font-bold',
+                textInput: 'text-cyan-400 font-bold',
+                placeholder: 'placeholder-fuchsia-500/30',
+                inputBarBg: 'bg-[#1a0b2e]/80'
+            };
+        default:
+            return {
+                bg: 'bg-slate-950',
+                border: 'border-slate-800',
+                text: 'text-slate-200',
+                textMuted: 'text-slate-500',
+                textError: 'text-red-400',
+                textInfo: 'text-blue-400',
+                textPrompt: 'text-green-500 font-bold',
+                textInput: 'text-slate-300 font-bold',
+                placeholder: 'placeholder-slate-700',
+                inputBarBg: 'bg-slate-900/50'
+            };
+    }
+  };
+
+  const colors = getColors();
+
   // --- Render ---
 
   if (isEditorOpen) {
@@ -1096,16 +1145,16 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
 
   return (
     <div 
-        className="flex flex-col h-full bg-slate-950 font-mono text-sm sm:text-base overflow-hidden p-2 rounded-lg"
+        className={`flex flex-col h-full font-mono text-sm sm:text-base overflow-hidden p-2 ${colors.border} ${colors.bg}`}
         onClick={() => inputRef.current?.focus()}
     >
       <div className="flex-1 overflow-y-auto space-y-1 p-2 custom-scrollbar pb-10">
         {history.map((line, i) => (
             <div key={i} className={`whitespace-pre-wrap break-words leading-relaxed ${
-                line.type === 'error' ? 'text-red-400' : 
-                line.type === 'info' ? 'text-blue-400' :
-                line.type === 'input' ? 'text-slate-300 font-bold' : 
-                'text-green-400'
+                line.type === 'error' ? colors.textError : 
+                line.type === 'info' ? colors.textInfo :
+                line.type === 'input' ? colors.textInput : 
+                colors.text
             }`}>
                 {line.content}
             </div>
@@ -1113,8 +1162,8 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
         <div ref={bottomRef} />
       </div>
 
-      <div className="flex items-center space-x-2 p-2 border-t border-slate-800 bg-slate-900/50">
-        <span className="text-green-500 font-bold select-none whitespace-nowrap">
+      <div className={`flex items-center space-x-2 p-2 border-t ${colors.border} ${colors.inputBarBg}`}>
+        <span className={`${colors.textPrompt} select-none whitespace-nowrap`}>
             {system.currentUser}@{system.hostname}:{getDirString()}$
         </span>
         <input
@@ -1123,7 +1172,7 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
             value={currentInput}
             onChange={(e) => setCurrentInput(e.target.value)}
             onKeyDown={handleShellKeyDown}
-            className="flex-1 bg-transparent outline-none text-slate-200 placeholder-slate-700 font-bold"
+            className={`flex-1 bg-transparent outline-none font-bold ${theme === 'synthwave' ? 'text-cyan-400' : (theme === 'retro' ? 'text-red-500' : 'text-slate-200')} ${colors.placeholder}`}
             autoComplete="off"
             spellCheck="false"
             autoFocus
