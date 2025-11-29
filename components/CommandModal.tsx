@@ -15,11 +15,13 @@ export const CommandModal: React.FC<Props> = ({ command, onClose, isFavorite, on
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [show, setShow] = useState(false);
   const [activeTab, setActiveTab] = useState<'manual' | 'sandbox'>('manual');
+  const [sandboxInitialCommand, setSandboxInitialCommand] = useState('');
 
   useEffect(() => {
     if (command) {
         setShow(true);
         setActiveTab('manual'); // Reset to manual when opening new command
+        setSandboxInitialCommand(''); // Reset sandbox input
     } else {
         setShow(false);
     }
@@ -94,7 +96,10 @@ export const CommandModal: React.FC<Props> = ({ command, onClose, isFavorite, on
                 </button>
                 {!isReference && (
                     <button 
-                        onClick={() => setActiveTab('sandbox')}
+                        onClick={() => {
+                            setSandboxInitialCommand(''); // Clear specific example if switching via tab
+                            setActiveTab('sandbox');
+                        }}
                         className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center ${
                             activeTab === 'sandbox' 
                             ? 'border-green-500 text-green-400' 
@@ -180,13 +185,16 @@ export const CommandModal: React.FC<Props> = ({ command, onClose, isFavorite, on
                                 <div className="flex gap-2">
                                      <button 
                                         onClick={() => {
+                                            setSandboxInitialCommand(ex.command);
                                             setActiveTab('sandbox');
-                                            // Optional: could auto-paste into terminal here via context/state if implemented
                                         }}
                                         className="text-slate-500 hover:text-green-400 transition-colors p-1.5 rounded-md hover:bg-slate-800 hidden sm:block"
                                         title="Try in Sandbox"
                                     >
-                                        <Icon name="Terminal" className="w-4 h-4" />
+                                        <div className="flex items-center space-x-1">
+                                           <Icon name="Terminal" className="w-4 h-4" />
+                                           <span className="text-xs font-semibold">Try</span>
+                                        </div>
                                     </button>
                                     <button 
                                         onClick={() => handleCopy(ex.command, idx)}
@@ -211,7 +219,7 @@ export const CommandModal: React.FC<Props> = ({ command, onClose, isFavorite, on
                         <p className="text-xs text-slate-500">Virtual offline shell. File system changes are temporary.</p>
                     </div>
                     <div className="flex-1 overflow-hidden border border-slate-800 rounded-lg shadow-2xl">
-                        <TerminalSandbox activeCommandName={command.name} />
+                        <TerminalSandbox activeCommandName={command.name} initialCommand={sandboxInitialCommand} />
                     </div>
                 </div>
             )}

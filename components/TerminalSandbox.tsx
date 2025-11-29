@@ -75,7 +75,7 @@ const INITIAL_FS: FileSystemNode = {
         'user': {
           ...createNode('user', 'dir'),
           children: {
-            'welcome.txt': createNode('welcome.txt', 'file', 'Welcome to Terminus Sandbox!\n\nFeatures:\n- Piping supported: cat file | grep text\n- Text editor: vim filename\n- Networking: ping, curl\n- Processes: ps, top, kill\n- Archives: tar, zip\n- System: htop, free, df'),
+            'welcome.txt': createNode('welcome.txt', 'file', 'Welcome to Terminus Sandbox!\n\nFeatures:\n- Piping supported: cat file | grep text\n- Text editor: vim filename\n- Networking: ping, curl\n- Processes: ps, top, kill\n- Archives: tar, zip\n- System: htop, free, df\n- Tab Completion: try typing "ca" then TAB'),
             'docs': {
                 ...createNode('docs', 'dir'),
                 children: {
@@ -193,19 +193,39 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editorContent, setEditorContent] = useState('');
   const [editorFilePath, setEditorFilePath] = useState<string[] | null>(null);
+  
+  // Vim Simulation State
+  const [vimMode, setVimMode] = useState<'NORMAL' | 'INSERT' | 'COMMAND' | 'PROMPT'>('NORMAL');
+  const [vimCommand, setVimCommand] = useState('');
+  const [vimStatus, setVimStatus] = useState('');
+  const [keyBuffer, setKeyBuffer] = useState('');
+  const [pendingSave, setPendingSave] = useState<'w' | 'wq' | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const commandInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setCurrentInput(initialCommand);
+    if (!isEditorOpen) {
+        inputRef.current?.focus();
+    }
+  }, [initialCommand]);
 
   useEffect(() => {
     if (!isEditorOpen) {
         inputRef.current?.focus();
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     } else {
-        editorRef.current?.focus();
+        // When editor opens, if in command mode or prompt mode, focus command input, else textarea
+        if (vimMode === 'COMMAND' || vimMode === 'PROMPT') {
+            commandInputRef.current?.focus();
+        } else {
+            editorRef.current?.focus();
+        }
     }
-  }, [history, isEditorOpen]);
+  }, [history, isEditorOpen, vimMode]);
 
   // --- File System Helpers ---
 
@@ -258,6 +278,146 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
     }
     return path;
  };
+
+ // --- Tab Completion ---
+
+ const handleTabCompletion = () => {
+    if (!inputRef.current) return;
+    
+    const cursor = inputRef.current.selectionStart || 0;
+    const text = currentInput;
+    
+    // 1. Identify the token under cursor
+    const lastSpaceIndex = text.lastIndexOf(' ', cursor - 1);
+    const startOfWord = lastSpaceIndex + 1;
+    const partial = text.substring(startOfWord, cursor);
+    
+    // 2. Determine Context: Command vs File
+    const textBeforeCursor = text.substring(0, cursor);
+    const lastSeparatorIndex = Math.max(
+        textBeforeCursor.lastIndexOf('|'), 
+        textBeforeCursor.lastIndexOf(';')
+    );
+    
+    // Is the start of our word after the last separator (and any subsequent spaces)?
+    const isCommand = (lastSeparatorIndex === -1 && startOfWord === 0) || 
+                      (lastSeparatorIndex !== -1 && textBeforeCursor.substring(lastSeparatorIndex + 1, startOfWord).trim() === '');
+                      
+    let candidates: string[] = [];
+    let filePrefix = partial;
+    
+    if (isCommand) {
+        // Filter supported commands
+        candidates = SUPPORTED_CMDS.filter(cmd => cmd.startsWith(partial));
+    } else {
+        // File path completion
+        const lastSlash = partial.lastIndexOf('/');
+        let dirPathArr: string[] = [];
+        
+        if (lastSlash !== -1) {
+            // Has directory component
+            const dirPart = partial.substring(0, lastSlash);
+            filePrefix = partial.substring(lastSlash + 1);
+            
+            if (partial.startsWith('/')) {
+                // Absolute path
+                if (lastSlash === 0) {
+                    dirPathArr = []; // Root
+                } else {
+                    dirPathArr = resolvePath(dirPart);
+                }
+            } else {
+                // Relative path
+                 if (dirPart === '~') {
+                    dirPathArr = ['home', system.currentUser];
+                 } else if (dirPart === '.') {
+                    dirPathArr = cwd;
+                 } else if (dirPart === '..') {
+                     dirPathArr = cwd.slice(0, -1);
+                 } else {
+                    dirPathArr = resolvePath(dirPart);
+                 }
+            }
+        } else {
+            // Relative to CWD
+            dirPathArr = cwd;
+        }
+        
+        // Lookup dir
+        const node = getPathNode(dirPathArr);
+        if (node && node.type === 'dir') {
+             candidates = Object.keys(node.children)
+                .filter(name => name.startsWith(filePrefix))
+                .map(name => {
+                    const child = node.children[name];
+                    return child.type === 'dir' ? name + '/' : name;
+                });
+        }
+    }
+    
+    if (candidates.length === 0) return;
+    
+    // 3. Apply Completion
+    if (candidates.length === 1) {
+        const match = candidates[0];
+        let completion = '';
+        if (isCommand) {
+             completion = match.substring(partial.length);
+        } else {
+             completion = match.substring(filePrefix.length);
+        }
+        
+        if (!match.endsWith('/')) {
+            completion += ' ';
+        }
+        
+        const newValue = text.substring(0, cursor) + completion + text.substring(cursor);
+        setCurrentInput(newValue);
+        
+        setTimeout(() => {
+            if (inputRef.current) {
+                inputRef.current.selectionStart = inputRef.current.selectionEnd = cursor + completion.length;
+            }
+        }, 0);
+        
+    } else {
+        // Multiple matches - Find Longest Common Prefix (LCP)
+        let lcp = candidates[0];
+        for (let i = 1; i < candidates.length; i++) {
+            let j = 0;
+            while(j < lcp.length && j < candidates[i].length && lcp[j] === candidates[i][j]) j++;
+            lcp = lcp.substring(0, j);
+        }
+        
+        let extension = '';
+        if (isCommand) {
+             if (lcp.length > partial.length) {
+                 extension = lcp.substring(partial.length);
+             }
+        } else {
+             if (lcp.length > filePrefix.length) {
+                 extension = lcp.substring(filePrefix.length);
+             }
+        }
+        
+        if (extension) {
+             const newValue = text.substring(0, cursor) + extension + text.substring(cursor);
+             setCurrentInput(newValue);
+             setTimeout(() => {
+                if (inputRef.current) {
+                    inputRef.current.selectionStart = inputRef.current.selectionEnd = cursor + extension.length;
+                }
+            }, 0);
+        } else {
+            // Cannot extend. List options.
+            setHistory(prev => [
+                ...prev,
+                { type: 'input', content: `${system.currentUser}@${system.hostname}:${getDirString()}$ ${text}` },
+                { type: 'output', content: candidates.join('  ') }
+            ]);
+        }
+    }
+  };
 
  // --- Command Logic ---
 
@@ -436,11 +596,25 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
             case 'vim': 
             case 'vi':
             case 'nano': {
-                const path = resolvePath(cleanArgs[0]);
-                const node = getPathNode(path);
-                setEditorContent(node?.type === 'file' ? node.content : '');
-                setEditorFilePath(path);
+                if (!cleanArgs[0]) {
+                    setEditorContent('');
+                    setEditorFilePath(null);
+                } else {
+                    const path = resolvePath(cleanArgs[0]);
+                    const node = getPathNode(path);
+                    if (node && node.type !== 'file') {
+                         return { type: 'error', output: `"${cleanArgs[0]}" is a directory` };
+                    }
+                    setEditorContent(node ? node.content : '');
+                    setEditorFilePath(path);
+                }
+                
                 setIsEditorOpen(true);
+                // Reset Vim State
+                setVimMode('NORMAL');
+                setVimStatus('');
+                setVimCommand('');
+                setKeyBuffer('');
                 return { type: 'output', output: '' };
             }
 
@@ -580,7 +754,7 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
 
   const handleCommand = (fullCmd: string) => {
     if (!fullCmd.trim()) {
-         setHistory(prev => [...prev, { type: 'input', content: `user@terminus:${getDirString()}$ ` }]);
+         setHistory(prev => [...prev, { type: 'input', content: `${system.currentUser}@${system.hostname}:${getDirString()}$ ` }]);
          return;
     }
 
@@ -606,18 +780,240 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
     }
   };
 
-  const saveEditor = () => {
-    if (editorFilePath) {
-        const path = editorFilePath;
-        const name = path[path.length-1];
-        const parentPath = path.slice(0, -1);
-        updateFS(parentPath, n => n.children[name] = createNode(name, 'file', editorContent, { owner: system.currentUser }));
+  // --- Editor Logic (Vim Mode) ---
+
+  const saveEditor = (shouldClose: boolean = false, newPathStr?: string) => {
+    let targetPath = editorFilePath;
+    
+    if (newPathStr) {
+        targetPath = resolvePath(newPathStr);
+        setEditorFilePath(targetPath);
     }
-    setIsEditorOpen(false);
-    setHistory(prev => [...prev, { type: 'info', content: `"${editorFilePath?.join('/')}" saved. ${editorContent.split('\n').length}L, ${editorContent.length}C written` }]);
+
+    if (!targetPath) {
+        setVimStatus('E32: No file name');
+        return false;
+    }
+
+    const path = targetPath;
+    const name = path[path.length-1];
+    const parentPath = path.slice(0, -1);
+    
+    // Check if directory exists
+    const parentNode = getPathNode(parentPath);
+    if (!parentNode || parentNode.type !== 'dir') {
+         setVimStatus(`E212: Can't open file for writing`);
+         return false;
+    }
+
+    updateFS(parentPath, n => n.children[name] = createNode(name, 'file', editorContent, { owner: system.currentUser }));
+    
+    if (!shouldClose) {
+            setVimStatus(`"${name}" ${editorContent.split('\n').length}L, ${editorContent.length}C written`);
+    } else {
+            setHistory(prev => [...prev, { type: 'info', content: `"${path.join('/')}" saved. ${editorContent.split('\n').length}L, ${editorContent.length}C written` }]);
+    }
+    
+    if (shouldClose) setIsEditorOpen(false);
+    return true;
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleVimKeyDown = (e: React.KeyboardEvent) => {
+    if (vimMode === 'INSERT') {
+        if (e.key === 'Escape') {
+            setVimMode('NORMAL');
+            setVimStatus('');
+            e.preventDefault();
+        }
+        return; // Allow typing in textarea
+    }
+
+    if (vimMode === 'COMMAND' || vimMode === 'PROMPT') {
+        // Handled by the command input
+        return;
+    }
+
+    if (vimMode === 'NORMAL') {
+        const textarea = editorRef.current;
+        if (!textarea) return;
+        
+        // Navigation keys h, j, k, l
+        if (['h', 'j', 'k', 'l'].includes(e.key)) {
+            e.preventDefault();
+            const start = textarea.selectionStart;
+            const val = textarea.value;
+            
+            if (e.key === 'h') { // Left
+                 textarea.selectionStart = textarea.selectionEnd = Math.max(0, start - 1);
+            }
+            if (e.key === 'l') { // Right
+                 textarea.selectionStart = textarea.selectionEnd = Math.min(val.length, start + 1);
+            }
+            if (e.key === 'j') { // Down
+                 const nextLineStart = val.indexOf('\n', start);
+                 if (nextLineStart !== -1) {
+                     const currentLineStart = val.lastIndexOf('\n', start - 1) + 1;
+                     const offset = start - currentLineStart;
+                     const nextLineEnd = val.indexOf('\n', nextLineStart + 1);
+                     const actualNextLineEnd = nextLineEnd === -1 ? val.length : nextLineEnd;
+                     const nextLineLen = actualNextLineEnd - (nextLineStart + 1);
+                     const newOffset = Math.min(offset, nextLineLen);
+                     textarea.selectionStart = textarea.selectionEnd = nextLineStart + 1 + newOffset;
+                 }
+            }
+            if (e.key === 'k') { // Up
+                 const currentLineStart = val.lastIndexOf('\n', start - 1) + 1;
+                 if (currentLineStart > 0) {
+                     const prevLineEnd = currentLineStart - 1;
+                     const prevLineStart = val.lastIndexOf('\n', prevLineEnd - 1) + 1;
+                     const offset = start - currentLineStart;
+                     const prevLineLen = prevLineEnd - prevLineStart;
+                     const newOffset = Math.min(offset, prevLineLen);
+                     textarea.selectionStart = textarea.selectionEnd = prevLineStart + newOffset;
+                 }
+            }
+            return;
+        }
+
+        // Allow arrow navigation
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+
+        e.preventDefault();
+        const start = textarea.selectionStart;
+        const val = textarea.value;
+
+        // Multi-key handling (gg, dd)
+        if (keyBuffer) {
+            if (e.key === 'd' && keyBuffer === 'd') {
+                // dd: delete line
+                const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+                const lineEnd = val.indexOf('\n', start);
+                const nextPos = lineEnd === -1 ? val.length : lineEnd + 1;
+                
+                const newVal = val.slice(0, lineStart) + val.slice(nextPos);
+                setEditorContent(newVal);
+                setVimStatus('1 line deleted');
+                setTimeout(() => textarea.selectionStart = textarea.selectionEnd = lineStart, 0);
+            } else if (e.key === 'g' && keyBuffer === 'g') {
+                // gg: top
+                textarea.selectionStart = textarea.selectionEnd = 0;
+            }
+            setKeyBuffer('');
+            return;
+        }
+
+        switch (e.key) {
+            case 'i':
+                setVimMode('INSERT');
+                setVimStatus('-- INSERT --');
+                break;
+            case ':':
+                setVimMode('COMMAND');
+                setVimCommand(':');
+                break;
+            case 'o': // Insert line below
+                const nextNewLine = val.indexOf('\n', start);
+                const insertPos = nextNewLine === -1 ? val.length : nextNewLine;
+                const newVal = val.slice(0, insertPos) + '\n' + val.slice(insertPos);
+                setEditorContent(newVal);
+                setTimeout(() => {
+                    textarea.selectionStart = textarea.selectionEnd = insertPos + 1;
+                    setVimMode('INSERT');
+                    setVimStatus('-- INSERT --');
+                }, 0);
+                break;
+            case 'x': // Delete char
+                if (start < val.length) {
+                    const newValX = val.slice(0, start) + val.slice(start + 1);
+                    setEditorContent(newValX);
+                    setTimeout(() => textarea.selectionStart = textarea.selectionEnd = start, 0);
+                }
+                break;
+            case '0': // Start of line
+                const prevNewLine = val.lastIndexOf('\n', start - 1);
+                textarea.selectionStart = textarea.selectionEnd = prevNewLine + 1;
+                break;
+            case '$': // End of line
+                const lineEnd = val.indexOf('\n', start);
+                const pos = lineEnd === -1 ? val.length : lineEnd;
+                textarea.selectionStart = textarea.selectionEnd = pos;
+                break;
+            case 'G': // Bottom
+                textarea.selectionStart = textarea.selectionEnd = val.length;
+                break;
+            case 'g': 
+            case 'd':
+                setKeyBuffer(e.key);
+                // Clear buffer after 1s if no second key press
+                setTimeout(() => setKeyBuffer(prev => prev === e.key ? '' : prev), 1000);
+                break;
+        }
+    }
+  };
+
+  const handleCommandKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+        if (vimMode === 'PROMPT') {
+            const filename = vimCommand.trim();
+            if (filename) {
+                saveEditor(pendingSave === 'wq', filename);
+            } else {
+                setVimStatus('E32: No file name');
+            }
+            setVimMode('NORMAL');
+            setPendingSave(null);
+            return;
+        }
+
+        const rawCmd = vimCommand.substring(1).trim();
+        const args = rawCmd.split(' ');
+        const cmd = args[0];
+        const arg1 = args[1]; // Filename argument
+
+        if (cmd === 'w') {
+            if (!arg1 && !editorFilePath) {
+                setVimMode('PROMPT');
+                setVimCommand('');
+                setPendingSave('w');
+                return;
+            }
+            saveEditor(false, arg1);
+            setVimMode('NORMAL');
+        } else if (cmd === 'q') {
+            if (!editorFilePath && editorContent && rawCmd !== 'q!') {
+                setVimStatus('E37: No write since last change (add ! to override)');
+                setVimMode('NORMAL');
+                return;
+            }
+             setIsEditorOpen(false);
+        } else if (cmd === 'q!') {
+             setIsEditorOpen(false);
+        } else if (cmd === 'wq') {
+             if (!arg1 && !editorFilePath) {
+                setVimMode('PROMPT');
+                setVimCommand('');
+                setPendingSave('wq');
+                return;
+             }
+             saveEditor(true, arg1);
+        } else {
+             setVimStatus(`E492: Not an editor command: ${cmd}`);
+             setVimMode('NORMAL');
+        }
+    } else if (e.key === 'Escape') {
+        setVimMode('NORMAL');
+        setVimStatus('');
+        setPendingSave(null);
+    }
+  };
+
+  const handleShellKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Tab') {
+        e.preventDefault();
+        handleTabCompletion();
+        return;
+    }
+
     if (e.key === 'Enter') {
         handleCommand(currentInput);
         setCurrentInput('');
@@ -631,22 +1027,68 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
 
   if (isEditorOpen) {
       return (
-          <div className="flex flex-col h-full bg-slate-900 font-mono text-sm relative">
-              <div className="bg-slate-800 text-slate-300 px-2 py-1 flex justify-between">
+          <div className="flex flex-col h-full bg-[#1e1e1e] font-mono text-sm relative text-[#cccccc]">
+              {/* VIM Info Bar */}
+              <div className="bg-slate-800 text-slate-400 px-2 py-1 text-xs flex justify-between select-none">
                   <span>VIM - {editorFilePath?.join('/') || '[No Name]'}</span>
-                  <span>Modified</span>
+                  {/* Keep simplified Mode here too for redundancy, but user specifically asked for bottom display improvement or just general display */}
+                  {/* We rely on the bottom bar for the main "Display to user when they are in Normal Mode" requirement */}
+                  <span>{vimMode === 'PROMPT' ? 'COMMAND' : vimMode}</span>
               </div>
+              
               <textarea 
                 ref={editorRef}
                 value={editorContent}
                 onChange={e => setEditorContent(e.target.value)}
-                className="flex-1 bg-slate-950 text-slate-200 p-2 outline-none resize-none font-mono"
+                onKeyDown={handleVimKeyDown}
+                className={`flex-1 bg-[#1e1e1e] p-2 outline-none resize-none font-mono ${vimMode === 'NORMAL' ? 'cursor-block' : 'cursor-text caret-white'}`}
                 spellCheck={false}
               />
-              <div className="bg-slate-800 text-slate-400 px-2 py-1 text-xs flex gap-4">
-                  <span>NORMAL</span>
-                  <button onClick={saveEditor} className="hover:text-white font-bold">[ :wq Save & Quit ]</button>
-                  <button onClick={() => setIsEditorOpen(false)} className="hover:text-white font-bold">[ :q! Discard ]</button>
+              
+              {/* Command / Status Bar */}
+              <div className="bg-[#2e2e2e] text-[#cccccc] px-2 py-1 text-xs min-h-[24px] flex items-center border-t border-slate-700 justify-between">
+                <div className="flex-1 flex items-center">
+                    {vimMode === 'COMMAND' || vimMode === 'PROMPT' ? (
+                        <>
+                            {vimMode === 'PROMPT' && <span className="mr-2 text-yellow-400 font-bold">Name: </span>}
+                            <input 
+                                ref={commandInputRef}
+                                type="text"
+                                value={vimCommand}
+                                onChange={e => setVimCommand(e.target.value)}
+                                onKeyDown={handleCommandKeyDown}
+                                className="flex-1 bg-transparent border-none outline-none font-mono text-[#cccccc] p-0 m-0"
+                            />
+                        </>
+                    ) : (
+                        <span>{vimStatus}</span>
+                    )}
+                </div>
+
+                <div className="flex items-center space-x-3 select-none">
+                    {vimMode === 'NORMAL' && <span className="font-bold text-green-400">-- NORMAL --</span>}
+                    {vimMode === 'INSERT' && <span className="font-bold text-blue-400">-- INSERT --</span>}
+                    {/* If prompt/command, mode is implicit in the input on the left */}
+                    
+                    <span className="hidden sm:inline text-slate-500">
+                        {editorContent.length}B
+                    </span>
+                </div>
+              </div>
+
+              {/* Help Overlay for Sandbox Learning */}
+              <div className="bg-slate-900 border-t border-slate-700 p-2 text-[11px] text-slate-400 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-x-4 gap-y-1">
+                 <div><span className="text-green-400 font-bold">i</span> Insert</div>
+                 <div><span className="text-green-400 font-bold">ESC</span> Normal</div>
+                 <div><span className="text-green-400 font-bold">:w</span> Save</div>
+                 <div><span className="text-green-400 font-bold">:q</span> Quit</div>
+                 <div><span className="text-green-400 font-bold">h/j/k/l</span> Move</div>
+                 <div><span className="text-green-400 font-bold">dd</span> Del Line</div>
+                 <div><span className="text-green-400 font-bold">x</span> Del Char</div>
+                 <div><span className="text-green-400 font-bold">0</span> Start Line</div>
+                 <div><span className="text-green-400 font-bold">$</span> End Line</div>
+                 <div><span className="text-green-400 font-bold">gg</span> Top</div>
+                 <div><span className="text-green-400 font-bold">G</span> Bottom</div>
               </div>
           </div>
       )
@@ -680,7 +1122,7 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
             type="text"
             value={currentInput}
             onChange={(e) => setCurrentInput(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onKeyDown={handleShellKeyDown}
             className="flex-1 bg-transparent outline-none text-slate-200 placeholder-slate-700 font-bold"
             autoComplete="off"
             spellCheck="false"
