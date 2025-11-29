@@ -1,8 +1,10 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { CATEGORIES } from './constants';
 import { Category, CommandDetail } from './types';
 import { CommandModal } from './components/CommandModal';
 import { AddCommandModal } from './components/AddCommandModal';
+import { VisualBuilder } from './components/VisualBuilder';
 import { Icon } from './components/Icons';
 
 // Extension to store categoryID with the command for local storage purposes
@@ -12,6 +14,8 @@ interface CustomCommand extends CommandDetail {
 
 export type Theme = 'default' | 'retro' | 'synthwave';
 
+type ViewMode = 'browser' | 'builder';
+
 const App: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<Category>(CATEGORIES[0]);
   const [selectedCommand, setSelectedCommand] = useState<CommandDetail | null>(null);
@@ -19,6 +23,9 @@ const App: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   
+  // View Mode
+  const [viewMode, setViewMode] = useState<ViewMode>('browser');
+
   // Theme State
   const [theme, setTheme] = useState<Theme>('default');
 
@@ -67,6 +74,24 @@ const App: React.FC = () => {
         if (prev === 'retro') return 'synthwave';
         return 'default';
     });
+  };
+
+  const handleRunInSandbox = (cmd: string) => {
+      // Find a suitable command to open the modal with, e.g., 'cat' or 'ls' as a base
+      // Then pre-fill the sandbox. 
+      // Since CommandModal controls the sandbox state internally, we'll open a generic 'Sandbox' command
+      // We'll construct a dummy command object for the modal
+      const dummyCommand: CommandDetail = {
+          name: 'Visual Pipeline',
+          shortDesc: 'Generated from Visual Builder',
+          summary: 'Custom pipeline execution environment.',
+          type: 'command',
+          syntax: cmd,
+          options: [],
+          examples: [{ description: 'Generated Pipeline', command: cmd }]
+      };
+      setSelectedCommand(dummyCommand);
+      // Note: In a real app, we'd pass `initialMode='sandbox'` to CommandModal
   };
 
   // Merge Custom Commands into Categories
@@ -246,9 +271,10 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex-1 overflow-y-auto py-6 space-y-1">
+            {/* Categories Section */}
             <div className={`px-4 mb-2 text-xs font-semibold ${theme === 'synthwave' ? 'text-cyan-500/70' : (theme === 'retro' ? 'text-red-500/50' : 'text-slate-500')} uppercase tracking-wider`}>Categories</div>
             {navCategories.map((category) => {
-              const isActive = selectedCategory.id === category.id && !searchTerm;
+              const isActive = viewMode === 'browser' && selectedCategory.id === category.id && !searchTerm;
               
               const iconColor = isActive 
                 ? themeConfig.logoColor 
@@ -258,6 +284,7 @@ const App: React.FC = () => {
                 <button
                   key={category.id}
                   onClick={() => {
+                    setViewMode('browser');
                     setSelectedCategory(category);
                     setSearchTerm('');
                     setIsMobileMenuOpen(false);
@@ -276,6 +303,21 @@ const App: React.FC = () => {
                 </button>
               );
             })}
+
+            {/* Tools Section */}
+            <div className={`px-4 mb-2 mt-6 text-xs font-semibold ${theme === 'synthwave' ? 'text-cyan-500/70' : (theme === 'retro' ? 'text-red-500/50' : 'text-slate-500')} uppercase tracking-wider`}>Tools</div>
+            <button
+                onClick={() => {
+                    setViewMode('builder');
+                    setIsMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center px-6 py-3 text-sm font-medium transition-all duration-200 relative
+                    ${viewMode === 'builder' ? themeConfig.categoryActive : themeConfig.categoryInactive}
+                `}
+            >
+                <Icon name="Puzzle" className={`w-5 h-5 mr-3 ${viewMode === 'builder' ? themeConfig.logoColor : (theme === 'synthwave' ? 'text-cyan-600' : (theme === 'retro' ? 'text-red-800' : 'text-slate-500'))}`} />
+                Visual Builder <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">New</span>
+            </button>
           </div>
           
           {/* ASCII Art Footer - Theme Toggle */}
@@ -318,16 +360,26 @@ const App: React.FC = () => {
         {/* Top Bar / Search */}
         <header className={`h-20 border-b ${themeConfig.headerBg} backdrop-blur-sm flex items-center justify-between px-6 sticky top-0 z-20 gap-4`}>
           <div className="w-full max-w-2xl relative group">
-            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-              <Icon name="Search" className={`h-5 w-5 transition-colors ${theme === 'synthwave' ? 'text-fuchsia-500/50 group-focus-within:text-cyan-400' : (theme === 'retro' ? 'text-red-600 group-focus-within:text-red-500' : 'text-slate-500 group-focus-within:text-green-500')}`} />
-            </div>
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search commands (e.g., 'tar', 'network', 'permission')..."
-              className={`block w-full pl-11 pr-4 py-3 ${themeConfig.radius} leading-5 transition-all duration-200 outline-none focus:ring-2 ${themeConfig.inputBg}`}
-            />
+            {viewMode === 'browser' && (
+                <>
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <Icon name="Search" className={`h-5 w-5 transition-colors ${theme === 'synthwave' ? 'text-fuchsia-500/50 group-focus-within:text-cyan-400' : (theme === 'retro' ? 'text-red-600 group-focus-within:text-red-500' : 'text-slate-500 group-focus-within:text-green-500')}`} />
+                    </div>
+                    <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search commands (e.g., 'tar', 'network', 'permission')..."
+                    className={`block w-full pl-11 pr-4 py-3 ${themeConfig.radius} leading-5 transition-all duration-200 outline-none focus:ring-2 ${themeConfig.inputBg}`}
+                    />
+                </>
+            )}
+            {viewMode === 'builder' && (
+                <div className={`flex items-center space-x-3 text-lg font-bold ${themeConfig.textMain}`}>
+                    <Icon name="Puzzle" className="w-6 h-6" />
+                    <span>Visual Pipeline Builder</span>
+                </div>
+            )}
           </div>
           
           <div className="flex items-center gap-4">
@@ -355,100 +407,104 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        {/* Scrollable Grid */}
-        <div className="flex-1 overflow-y-auto p-6 sm:p-8 scroll-smooth">
-            
-            {/* Page Title */}
-            <div className="mb-8">
-                <h1 className={`text-3xl font-bold mb-2 ${themeConfig.textMain}`}>
-                    {searchTerm ? (
-                        <span className="flex items-center gap-3">
-                            Search Results <span className={`text-lg font-normal ${themeConfig.textMuted}`}>for "{searchTerm}"</span>
-                        </span>
-                    ) : (
-                        <span className="flex items-center gap-3">
-                            <Icon name={activeCategory.icon} className={`w-8 h-8 ${theme === 'synthwave' ? 'text-fuchsia-400' : (theme === 'retro' ? 'text-red-600' : (activeCategory.id === 'favorites' ? 'text-yellow-400' : 'text-green-500'))}`} />
-                            {activeCategory.name}
-                        </span>
-                    )}
-                </h1>
-                <p className={`${themeConfig.textMuted}`}>
-                    {searchTerm 
-                        ? `Found ${displayedCommands.length} matching commands.` 
-                        : `Browse ${displayedCommands.length} commands for ${activeCategory.name.toLowerCase()}.`
-                    }
-                </p>
-            </div>
-
-            {/* Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {displayedCommands.map((cmd) => {
-                    const isFav = favorites.includes(cmd.name);
-                    const isReference = cmd.type === 'reference';
-                    
-                    let cardSpecificClass = themeConfig.cardSpecific;
-                    if (theme === 'default') {
-                         cardSpecificClass = isReference 
-                            ? 'hover:border-indigo-500/50 hover:shadow-indigo-900/10' 
-                            : 'hover:border-green-500/50 hover:shadow-green-900/10';
-                    }
-
-                    let titleColorClass = themeConfig.titleColor;
-                    if (theme === 'default') {
-                        titleColorClass = isReference ? 'text-indigo-400 group-hover:text-indigo-300' : 'text-green-400 group-hover:text-green-300';
-                    }
-                    
-                    return (
-                        <button
-                            key={cmd.name}
-                            onClick={() => setSelectedCommand(cmd)}
-                            className={`group relative flex flex-col p-5 border ${themeConfig.radius} text-left transition-all duration-200 ${themeConfig.cardBase} ${cardSpecificClass}`}
-                        >
-                            <div className="absolute top-4 right-4 z-10">
-                                <div 
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        toggleFavorite(cmd.name);
-                                    }}
-                                    className={`p-1.5 ${themeConfig.radiusFull} transition-colors ${isFav ? themeConfig.starBg : 'hover:bg-slate-700/50'}`}
-                                >
-                                    <Icon name="Star" className={`w-4 h-4 ${isFav ? themeConfig.starActive : themeConfig.starInactive}`} />
-                                </div>
-                            </div>
-                            
-                            <div className="flex items-center justify-between mb-3 w-full pr-8">
-                                <span className={`font-mono text-xl font-bold transition-colors ${titleColorClass}`}>
-                                    {cmd.name}
-                                </span>
-                            </div>
-                            <p className={`text-sm leading-relaxed line-clamp-2 ${themeConfig.descColor}`}>
-                                {cmd.shortDesc}
-                            </p>
-                        </button>
-                    );
-                })}
-
-                {displayedCommands.length === 0 && (
-                    <div className={`col-span-full flex flex-col items-center justify-center py-20 ${themeConfig.textMuted}`}>
-                        {activeCategory.id === 'favorites' ? (
-                            <>
-                                <Icon name="Star" className="w-12 h-12 mb-4 opacity-20" />
-                                <p className="text-lg font-medium">No favorites yet.</p>
-                                <p className="text-sm mt-2">Star commands to access them quickly here.</p>
-                            </>
+        {/* Main Content Area */}
+        {viewMode === 'browser' ? (
+            <div className="flex-1 overflow-y-auto p-6 sm:p-8 scroll-smooth">
+                
+                {/* Page Title */}
+                <div className="mb-8">
+                    <h1 className={`text-3xl font-bold mb-2 ${themeConfig.textMain}`}>
+                        {searchTerm ? (
+                            <span className="flex items-center gap-3">
+                                Search Results <span className={`text-lg font-normal ${themeConfig.textMuted}`}>for "{searchTerm}"</span>
+                            </span>
                         ) : (
-                            <>
-                                <Icon name="Search" className="w-12 h-12 mb-4 opacity-20" />
-                                <p className="text-lg font-medium">No commands found.</p>
-                                <p className="text-sm mt-2">Try searching for a different keyword or add your own!</p>
-                            </>
+                            <span className="flex items-center gap-3">
+                                <Icon name={activeCategory.icon} className={`w-8 h-8 ${theme === 'synthwave' ? 'text-fuchsia-400' : (theme === 'retro' ? 'text-red-600' : (activeCategory.id === 'favorites' ? 'text-yellow-400' : 'text-green-500'))}`} />
+                                {activeCategory.name}
+                            </span>
                         )}
-                    </div>
-                )}
+                    </h1>
+                    <p className={`${themeConfig.textMuted}`}>
+                        {searchTerm 
+                            ? `Found ${displayedCommands.length} matching commands.` 
+                            : `Browse ${displayedCommands.length} commands for ${activeCategory.name.toLowerCase()}.`
+                        }
+                    </p>
+                </div>
+
+                {/* Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {displayedCommands.map((cmd) => {
+                        const isFav = favorites.includes(cmd.name);
+                        const isReference = cmd.type === 'reference';
+                        
+                        let cardSpecificClass = themeConfig.cardSpecific;
+                        if (theme === 'default') {
+                            cardSpecificClass = isReference 
+                                ? 'hover:border-indigo-500/50 hover:shadow-indigo-900/10' 
+                                : 'hover:border-green-500/50 hover:shadow-green-900/10';
+                        }
+
+                        let titleColorClass = themeConfig.titleColor;
+                        if (theme === 'default') {
+                            titleColorClass = isReference ? 'text-indigo-400 group-hover:text-indigo-300' : 'text-green-400 group-hover:text-green-300';
+                        }
+                        
+                        return (
+                            <button
+                                key={cmd.name}
+                                onClick={() => setSelectedCommand(cmd)}
+                                className={`group relative flex flex-col p-5 border ${themeConfig.radius} text-left transition-all duration-200 ${themeConfig.cardBase} ${cardSpecificClass}`}
+                            >
+                                <div className="absolute top-4 right-4 z-10">
+                                    <div 
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleFavorite(cmd.name);
+                                        }}
+                                        className={`p-1.5 ${themeConfig.radiusFull} transition-colors ${isFav ? themeConfig.starBg : 'hover:bg-slate-700/50'}`}
+                                    >
+                                        <Icon name="Star" className={`w-4 h-4 ${isFav ? themeConfig.starActive : themeConfig.starInactive}`} />
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center justify-between mb-3 w-full pr-8">
+                                    <span className={`font-mono text-xl font-bold transition-colors ${titleColorClass}`}>
+                                        {cmd.name}
+                                    </span>
+                                </div>
+                                <p className={`text-sm leading-relaxed line-clamp-2 ${themeConfig.descColor}`}>
+                                    {cmd.shortDesc}
+                                </p>
+                            </button>
+                        );
+                    })}
+
+                    {displayedCommands.length === 0 && (
+                        <div className={`col-span-full flex flex-col items-center justify-center py-20 ${themeConfig.textMuted}`}>
+                            {activeCategory.id === 'favorites' ? (
+                                <>
+                                    <Icon name="Star" className="w-12 h-12 mb-4 opacity-20" />
+                                    <p className="text-lg font-medium">No favorites yet.</p>
+                                    <p className="text-sm mt-2">Star commands to access them quickly here.</p>
+                                </>
+                            ) : (
+                                <>
+                                    <Icon name="Search" className="w-12 h-12 mb-4 opacity-20" />
+                                    <p className="text-lg font-medium">No commands found.</p>
+                                    <p className="text-sm mt-2">Try searching for a different keyword or add your own!</p>
+                                </>
+                            )}
+                        </div>
+                    )}
+                </div>
+                
+                <div className="h-20" /> {/* Spacer for bottom scrolling */}
             </div>
-            
-            <div className="h-20" /> {/* Spacer for bottom scrolling */}
-        </div>
+        ) : (
+            <VisualBuilder theme={theme} onRunInSandbox={handleRunInSandbox} />
+        )}
       </main>
 
       {/* Detail Modal */}

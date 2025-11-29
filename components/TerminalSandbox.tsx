@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Theme } from '../App';
 
@@ -430,10 +431,22 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
     
     // Helper to get input (argument file or stdin)
     const getInputText = (argIndex: number = 0): string | null => {
-        if (cleanArgs[argIndex] && !cleanArgs[argIndex].startsWith('-')) {
-            const node = getPathNode(resolvePath(cleanArgs[argIndex]));
+        // Try to find the first non-flag argument
+        let targetArg = cleanArgs[argIndex];
+        
+        // Simple logic: if arg starts with -, try next one (very basic)
+        // For grep, cat, etc. usually last arg is file.
+        // This is a simplistic mock.
+        
+        if (targetArg && targetArg.startsWith('-')) {
+             // Look ahead one
+             if (cleanArgs[argIndex + 1]) targetArg = cleanArgs[argIndex + 1];
+        }
+
+        if (targetArg && !targetArg.startsWith('-')) {
+            const node = getPathNode(resolvePath(targetArg));
             if (node && node.type === 'file') return node.content;
-            return null; // Error usually
+            return null; 
         }
         return stdin || null;
     };
@@ -452,14 +465,19 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
             // --- File Management ---
             case 'pwd': return { type: 'output', output: '/' + cwd.join('/') };
             case 'ls': {
-                const showAll = cleanArgs.includes('-a') || cleanArgs.includes('-la') || cleanArgs.includes('-al');
-                const showLong = cleanArgs.includes('-l') || cleanArgs.includes('-la') || cleanArgs.includes('-al') || cleanArgs.includes('-ll');
+                const showAll = cleanArgs.includes('-a') || cleanArgs.includes('-la') || cleanArgs.includes('-al') || cleanArgs.includes('-latr') || cleanArgs.includes('-lR');
+                const showLong = cleanArgs.includes('-l') || cleanArgs.includes('-la') || cleanArgs.includes('-al') || cleanArgs.includes('-ll') || cleanArgs.includes('-latr') || cleanArgs.includes('-lR');
                 const pathStr = cleanArgs.find(a => !a.startsWith('-')) || '.';
                 const node = getPathNode(resolvePath(pathStr));
                 
                 if (!node) return { type: 'error', output: `ls: cannot access '${pathStr}': No such file` };
                 if (node.type === 'file') return { type: 'output', output: node.name };
                 
+                // Recursive mock for -R (simplified)
+                if (cleanArgs.includes('-R') || cleanArgs.includes('-lR')) {
+                     return { type: 'output', output: `.:\n${Object.keys(node.children).join('  ')}\n\n./docs:\nmanual.txt todo.list` };
+                }
+
                 const entries = Object.values(node.children).filter(c => showAll || !c.name.startsWith('.')).sort((a,b) => a.name.localeCompare(b.name));
                 if (showLong) {
                     return { type: 'output', output: `total ${entries.length}\n` + entries.map(e => `${e.permissions} 1 ${e.owner} ${e.group} ${e.size.toString().padStart(6)} ${e.updatedAt} ${e.name}${e.type === 'link' ? ' -> ' + e.target : ''}`).join('\n') };
@@ -557,10 +575,11 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
                 return { type: 'output', output: content };
             }
             case 'grep': {
-                const pattern = cleanArgs[0];
-                const text = getInputText(1);
+                // Ignore flags starting with - (like -v, -oE) for pattern matching
+                const pattern = cleanArgs.find(arg => !arg.startsWith('-')) || '';
+                const text = getInputText(cleanArgs.length > 1 ? cleanArgs.length - 1 : 0);
                 if (!text) return { type: 'output', output: '' };
-                return { type: 'output', output: text.split('\n').filter(l => l.includes(pattern)).join('\n') };
+                return { type: 'output', output: text.split('\n').filter(l => l.includes(pattern.replace(/['"]/g, ''))).join('\n') };
             }
             case 'sed': return { type: 'output', output: (getInputText(1) || '').replace(new RegExp(cleanArgs[0]?.split('/')[1] || '', 'g'), cleanArgs[0]?.split('/')[2] || '') };
             case 'awk': return { type: 'output', output: (getInputText(1) || '').split('\n').map(l => l.split(' ')[0]).join('\n') };
@@ -569,7 +588,16 @@ export const TerminalSandbox: React.FC<Props> = ({ initialCommand = '', activeCo
             case 'tail': return { type: 'output', output: (getInputText() || '').split('\n').slice(-5).join('\n') };
             case 'less':
             case 'more': return { type: 'output', output: getInputText() || '' };
-            case 'sort': return { type: 'output', output: (getInputText() || '').split('\n').sort().join('\n') };
+            case 'sort': {
+                const text = getInputText() || '';
+                const lines = text.split('\n');
+                if (cleanArgs.includes('-r') || cleanArgs.includes('-hr')) {
+                    lines.sort().reverse();
+                } else {
+                    lines.sort();
+                }
+                return { type: 'output', output: lines.join('\n') };
+            }
             case 'uniq': return { type: 'output', output: [...new Set((getInputText() || '').split('\n'))].join('\n') };
             case 'cut': return { type: 'output', output: (getInputText() || '').split('\n').map(l => l.substring(0, 5)).join('\n') };
             case 'tr': return { type: 'output', output: (getInputText() || '').toUpperCase() };
